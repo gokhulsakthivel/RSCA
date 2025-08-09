@@ -50,35 +50,57 @@ def parse_csv(path: str) -> Tuple[List[datetime.datetime], List[float], List[str
     speeds: List[float] = []
     stations: List[str] = []
     dprev: List[float] = []
+    def parse_time_flexible(time_val):
+        # Try %H:%M:%S first
+        try:
+            return datetime.datetime.strptime(time_val, '%H:%M:%S').time()
+        except Exception:
+            pass
+        # Try %m/%d/%y %H:%M or %m/%d/%y %H:%M:%S
+        for fmt in ('%m/%d/%y %H:%M', '%m/%d/%y %H:%M:%S', '%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S'):
+            try:
+                return datetime.datetime.strptime(time_val, fmt).time()
+            except Exception:
+                continue
+        return None
+
     with open(path, 'r', encoding='utf-8-sig', newline='') as f:
         reader = csv.reader(f)
         header = next(reader, None)
+        header_map = {col.strip().lower(): idx for idx, col in enumerate(header)} if header else {}
+        # Define expected columns (case-insensitive)
+        col_time = next((header_map[k] for k in header_map if k in ['time', 'event_detection_time', 'event_time']), 1)
+        col_speed = next((header_map[k] for k in header_map if k in ['speed', 'loco_speed', 'speed(kmph)']), 2)
+        col_station = next((header_map[k] for k in header_map if k in ['station_code', 'station', 'stationname', 'station_name']), 8)
+        col_dist = next((header_map[k] for k in header_map if k in ['distance', 'dist', 'distancefromprev', 'distfromprev']), 6)
         for row in reader:
             if not row or all(not c.strip() for c in row):
                 continue
-            if len(row) < 9:
-                row += [''] * (9 - len(row))
-            time_str = row[1].strip()
-            speed_str = row[2].strip()
-            station = row[8].strip() or ''
+            if len(row) < len(header):
+                row += [''] * (len(header) - len(row))
+            time_str = row[col_time].strip()
+            speed_str = row[col_speed].strip()
+            station = row[col_station].strip() if col_station < len(row) else ''
             if not time_str or not speed_str:
                 dprev.append(0.0)
                 continue
-            try:
-                t = datetime.datetime.strptime(time_str, '%H:%M:%S').time()
-            except ValueError:
+            t = parse_time_flexible(time_str)
+            if t is None:
                 dprev.append(0.0)
                 continue
             dt = datetime.datetime.combine(base_date, t)
             try:
                 sp = float(speed_str)
+                if sp < 0.7:
+                    sp = 0.0
+                sp = int(sp)
             except ValueError:
                 dprev.append(0.0)
                 continue
             dist_val = 0.0
-            if len(row) > 6:
+            if col_dist < len(row):
                 try:
-                    dist_val = float(row[6]) if row[6].strip() else 0.0
+                    dist_val = float(row[col_dist]) if row[col_dist].strip() else 0.0
                 except ValueError:
                     dist_val = 0.0
             times.append(dt)

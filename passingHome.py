@@ -57,32 +57,56 @@ def main():
     if base_date is None:
         base_date = extract_date_from_filename(os.path.basename(path)) or datetime.date.today()
 
-    with open(path,'r',encoding='utf-8-sig') as f:
-        r=csv.reader(f)
-        header=next(r, [])
-        rows=[row for row in r if row and any(c.strip() for c in row)]
+    with open(path, 'r', encoding='utf-8-sig') as f:
+        r = csv.reader(f)
+        header = next(r, [])
+        header_map = {col.strip().lower(): idx for idx, col in enumerate(header)}
+        rows = [row for row in r if row and any(c.strip() for c in row)]
 
-    records=[]
-    for row in rows:
-        if len(row)<9:
-            continue
+    # Define expected columns (case-insensitive)
+    col_dev = next((header_map[k] for k in header_map if k in ['device_id', 'dev', 'device']), 0)
+    col_time = next((header_map[k] for k in header_map if k in ['time', 'event_detection_time', 'event_time']), 1)
+    col_speed = next((header_map[k] for k in header_map if k in ['speed', 'loco_speed', 'speed(kmph)']), 2)
+    col_lat = next((header_map[k] for k in header_map if k in ['latitude', 'lat']), 3)
+    col_lon = next((header_map[k] for k in header_map if k in ['longitude', 'lon']), 4)
+    col_station = next((header_map[k] for k in header_map if k in ['station_code', 'station', 'stationname', 'station_name']), 8)
+
+    def parse_time_flexible(time_val):
+        # Try %H:%M:%S first
         try:
-            datetime.datetime.strptime(row[1].strip(),'%H:%M:%S')
+            return datetime.datetime.strptime(time_val, '%H:%M:%S').time()
         except Exception:
+            pass
+        # Try %m/%d/%y %H:%M or %m/%d/%y %H:%M:%S
+        for fmt in ('%m/%d/%y %H:%M', '%m/%d/%y %H:%M:%S', '%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S'):
+            try:
+                return datetime.datetime.strptime(time_val, fmt).time()
+            except Exception:
+                continue
+        return None
+
+    records = []
+    for row in rows:
+        # Pad row if short
+        if len(row) < len(header):
+            row += [''] * (len(header) - len(row))
+        time_val = row[col_time].strip()
+        t_obj = parse_time_flexible(time_val)
+        if t_obj is None:
             continue
-        speed_str=row[2].strip()
+        speed_str = row[col_speed].strip()
         try:
-            sp=float(speed_str)
+            sp = int(speed_str)
         except Exception:
             continue
         records.append({
-            'dev':row[0].strip(),
-            'time':row[1].strip(),
-            'speed':sp,
-            'speed_raw':speed_str,
-            'lat':row[3].strip(),
-            'lon':row[4].strip(),
-            'station':row[8].strip()
+            'dev': row[col_dev].strip(),
+            'time': t_obj.strftime('%H:%M:%S'),
+            'speed': sp,
+            'speed_raw': speed_str,
+            'lat': row[col_lat].strip(),
+            'lon': row[col_lon].strip(),
+            'station': row[col_station].strip()
         })
 
     halt_stations=set()
