@@ -158,7 +158,7 @@ def detect_station_stop_segments(times: List[datetime.datetime], speeds: List[fl
 
 # --- Deceleration charts (final segment) -------------------------------------
 
-def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[float], stations: List[str], segments, output_prefix: str='speed_chart', threshold: float = DECEL_THRESHOLD_KMPH) -> None:
+def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[float], stations: List[str], segments, dprev: list, output_prefix: str='speed_chart', threshold: float = DECEL_THRESHOLD_KMPH) -> None:
     """Create charts showing final deceleration from the LAST sample >= threshold before the zero-speed segment
     down to the FIRST zero sample (halt)."""
     try:
@@ -169,22 +169,38 @@ def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[fl
     for st, start_t, end_t, start_idx, end_idx in segments:  # start_idx is first zero
         station_counts[st] = station_counts.get(st, 0) + 1
         seq = station_counts[st]
-        # Find last index before start_idx where speed >= threshold
-        decel_start = None
+        # Find the last 1km before stop using dprev
+        dist_sum = 0.0
+        decel_start = start_idx
         i = start_idx - 1
-        while i >= 0:
-            if speeds[i] >= threshold:
-                decel_start = i
-                break
+        while i >= 0 and dist_sum < 1000.0:
+            dist = 0.0
+            if len(dprev) > i:
+                dist = dprev[i]
+            dist_sum += dist
+            decel_start = i
             i -= 1
-        if decel_start is None:
+        # If decel_start == start_idx, not enough data, skip
+        if decel_start == start_idx:
             continue
         tw = times[decel_start:start_idx+1]
         sw = speeds[decel_start:start_idx+1]
+        dseg = dprev[decel_start:start_idx+1] if len(dprev) >= start_idx+1 else [0]*(start_idx+1-decel_start)
         if not tw:
             continue
         max_speed = max(sw) if sw else 0
         first_speed = sw[0]
+        # Calculate indices for last 120m and 60m before stop
+        dist_cum = 0.0
+        idx_120 = idx_60 = None
+        for i in range(len(dseg)-1, -1, -1):
+            dist_cum += dseg[i]
+            if idx_120 is None and dist_cum >= 120:
+                idx_120 = i
+            if idx_60 is None and dist_cum >= 60:
+                idx_60 = i
+            if idx_120 is not None and idx_60 is not None:
+                break
         try:
             import matplotlib.pyplot as plt  # ensure inside loop safe
         except Exception:
@@ -192,13 +208,21 @@ def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[fl
         fig, ax = plt.subplots(figsize=(8,3))
         ax.plot(tw, sw, color='#ff7f0e', lw=1.5)
         ax.axvline(times[start_idx], color='red', ls='--', lw=0.9, label='Halt (0)')
-        ax.set_title(f'{st} Stop 15 - 0 kmph/100m')
+        if idx_120 is not None and 0 <= idx_120 < len(tw):
+            ax.axvline(tw[idx_120], color='blue', ls=':', lw=0.9, label='120m to stop')
+        if idx_60 is not None and 0 <= idx_60 < len(tw):
+            ax.axvline(tw[idx_60], color='green', ls=':', lw=0.9, label='60m to stop')
+        from matplotlib.lines import Line2D
+        custom_lines = [Line2D([0], [0], color='red', ls='--', lw=0.9, label='Halt (0)'),
+                       Line2D([0], [0], color='blue', ls=':', lw=0.9, label='120m to stop'),
+                       Line2D([0], [0], color='green', ls=':', lw=0.9, label='60m to stop')]
+        ax.set_title(f'{st} Stop: Last 1km to 0 kmph')
         ax.set_xlabel('Time')
         ax.set_ylabel('Speed (km/h)')
         ax.grid(alpha=0.3)
         ax.text(tw[0], max_speed*0.9 if max_speed>0 else 0.1, f'Start {first_speed:.1f}', color='#ff7f0e', fontsize=8, ha='left')
         ax.text(times[start_idx], (max_speed*0.2) if max_speed>0 else 0.1, '0', color='red', fontsize=8, ha='right')
-        ax.legend(frameon=False, fontsize=8)
+        ax.legend(handles=custom_lines, frameon=False, fontsize=8)
         fig.autofmt_xdate()
         out_base = f"{output_prefix}_{st}_{seq}_decel"
         exts = ['svg'] + (['png'] if PNG_OUTPUT else [])
@@ -250,7 +274,7 @@ def generate_chart(times: List[datetime.datetime], speeds: List[float], stations
         st_code = stations[full_idx]
         ax.axvline(times_ds[ds_idx], color='grey', lw=0.6, ls='--', alpha=0.6)
         if st_code and st_code not in used_label_codes:
-            ax.text(times_ds[ds_idx], ymax * 1.015, st_code, rotation=90, va='bottom', ha='center', fontsize=7, fontweight='bold')
+            ax.text(times_ds[ds_idx], -ymax * 0.08, st_code, rotation=90, va='top', ha='center', fontsize=7, fontweight='bold', clip_on=False)
             used_label_codes.add(st_code)
     ax.grid(alpha=0.3)
     segments = detect_station_stop_segments(times, speeds, stations, MIN_STOP_DURATION_SECONDS)
@@ -344,7 +368,7 @@ def main():
         return
     segments = generate_chart(times, speeds, stations)
     if segments:
-        generate_deceleration_charts(times, speeds, stations, segments)
+        generate_deceleration_charts(times, speeds, stations, segments, dprev)
 
 if __name__ == '__main__':
     main()
