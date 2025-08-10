@@ -13,7 +13,7 @@ import sys, re, csv, os, datetime, glob, math
 from typing import List, Tuple, Optional
 
 # Minimum stop duration (seconds) to qualify for station legend
-MIN_STOP_DURATION_SECONDS = 30
+MIN_STOP_DURATION_SECONDS = 1
 # Speed threshold for deceleration charts (km/h)
 DECEL_THRESHOLD_KMPH = 15.0
 INPUT_PATTERN = '*PrimaryGPSData*.csv'

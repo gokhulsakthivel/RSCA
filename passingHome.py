@@ -3,7 +3,7 @@ from typing import Optional
 import csv, datetime
 
 # Configuration defaults
-MIN_STOP_DURATION_DEFAULT = 30  # seconds
+MIN_STOP_DURATION_DEFAULT = 1  # seconds
 INPUT_GLOB = '*PrimaryGPSData*.csv'
 
 # --- Helpers -----------------------------------------------------------------
@@ -64,12 +64,12 @@ def main():
         rows = [row for row in r if row and any(c.strip() for c in row)]
 
     # Define expected columns (case-insensitive)
-    col_dev = next((header_map[k] for k in header_map if k in ['device_id', 'dev', 'device']), 0)
-    col_time = next((header_map[k] for k in header_map if k in ['time', 'event_detection_time', 'event_time']), 1)
-    col_speed = next((header_map[k] for k in header_map if k in ['speed', 'loco_speed', 'speed(kmph)']), 2)
+    col_dev = next((header_map[k] for k in header_map if k in ['device id', 'device_id', 'dev', 'device']), 0)
+    col_time = next((header_map[k] for k in header_map if k in ['logging time', 'time', 'event_detection_time', 'event_time']), 1)
+    col_speed = next((header_map[k] for k in header_map if k in ['speed', 'loco_speed', 'speed(kmph)']), 5)  # Use column 5 for 'Speed'
     col_lat = next((header_map[k] for k in header_map if k in ['latitude', 'lat']), 3)
     col_lon = next((header_map[k] for k in header_map if k in ['longitude', 'lon']), 4)
-    col_station = next((header_map[k] for k in header_map if k in ['station_code', 'station', 'stationname', 'station_name']), 8)
+    col_station = next((header_map[k] for k in header_map if k in ['last/cur stationcode', 'station_code', 'station', 'stationname', 'station_name']), 8)
 
     def parse_time_flexible(time_val):
         # Try %H:%M:%S first
@@ -96,7 +96,7 @@ def main():
             continue
         speed_str = row[col_speed].strip()
         try:
-            sp = int(speed_str)
+            sp = float(speed_str)
         except Exception:
             continue
         records.append({
@@ -112,19 +112,19 @@ def main():
     halt_stations=set()
     i=0; n=len(records)
     while i<n:
-        rec=records[i]
-        if rec['speed']==0 and rec['station']:
-            st=rec['station']
-            j=i+1
-            while j<n and records[j]['station']==st and records[j]['speed']==0:
-                j+=1
-            t1=datetime.datetime.strptime(records[i]['time'],'%H:%M:%S')
-            t2=datetime.datetime.strptime(records[j-1]['time'],'%H:%M:%S')
-            if (t2-t1).total_seconds()>=min_stop:
+        rec = records[i]
+        if rec['speed'] == 0.0 and rec['station']:
+            st = rec['station']
+            j = i + 1
+            while j < n and records[j]['station'] == st and records[j]['speed'] == 0.0:
+                j += 1
+            t1 = datetime.datetime.strptime(records[i]['time'], '%H:%M:%S')
+            t2 = datetime.datetime.strptime(records[j - 1]['time'], '%H:%M:%S')
+            if (t2 - t1).total_seconds() >= min_stop:
                 halt_stations.add(st)
-            i=j
+            i = j
         else:
-            i+=1
+            i += 1
 
     seen=set(); arrivals=[]
     for rec in records:

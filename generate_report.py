@@ -118,9 +118,9 @@ def build_docx(output_docx: str, base_headers: List[str], base_rows: List[List[s
             for i,val in enumerate(rowdata):
                 if i < len(r):
                     r[i].text = val
-    # Halt arrival table
+    # Halt arrival table (parsed table only)
     if table_headers:
-        doc.add_heading('Halt Arrival Table', level=2)
+        doc.add_heading('Halt Arrival Table (Parsed Table)', level=3)
         t = doc.add_table(rows=1, cols=len(table_headers))
         hdr_cells = t.rows[0].cells
         for i, h in enumerate(table_headers):
@@ -186,7 +186,7 @@ def main():
     ap.add_argument('csv', help='Input GPS CSV file')
     ap.add_argument('--output', default='', help='Output Word document (default: dynamic name)')
     ap.add_argument('--loco', default='', help='Loco number (passed to passingHome.py)')
-    ap.add_argument('--min-stop', type=int, default=30, help='Minimum stop duration seconds (passed to passingHome.py)')
+    ap.add_argument('--min-stop', type=int, default=1, help='Minimum stop duration seconds (passed to passingHome.py)')
     ap.add_argument('--keep-png', action='store_true', help='Keep intermediate PNG copies created from SVG.')
     ap.add_argument('--train', default='', help='Train number (passed to baseInfo.py)')
     args = ap.parse_args()
@@ -227,6 +227,8 @@ def main():
         print('passingHome.py not found in current directory.')
     else:
         rc, out = run_script_collect_output('passingHome.py', [csv_path, '--loco', args.loco, '--min-stop', str(args.min_stop)])
+        # Store the raw output for later use in build_docx
+        build_docx.raw_passinghome_output = out
         table_headers, table_rows = parse_markdown_table(out)
         if not table_headers:
             print('Could not parse table from passingHome.py output.')
