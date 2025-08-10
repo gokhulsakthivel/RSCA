@@ -41,6 +41,20 @@ def extract_pilot_name(csv_path: str) -> str:
     return ' '.join(filtered) if filtered else ' '.join(cleaned)
 
 def parse_csv(path: str):
+    def parse_time_flexible(time_val):
+        # Try %H:%M:%S first
+        try:
+            return datetime.datetime.strptime(time_val, '%H:%M:%S').time(), '%H:%M:%S'
+        except Exception:
+            pass
+        # Try %m/%d/%y %H:%M or %m/%d/%y %H:%M:%S
+        for fmt in ('%m/%d/%y %H:%M', '%m/%d/%y %H:%M:%S', '%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S'):
+            try:
+                return datetime.datetime.strptime(time_val, fmt).time(), fmt
+            except Exception:
+                continue
+        return None, None
+
     first_time = None
     last_time = None
     first_station = None
@@ -61,13 +75,12 @@ def parse_csv(path: str):
             if dev and device_id is None:
                 device_id = dev
             if t_str:
-                try:
-                    _ = datetime.datetime.strptime(t_str, '%H:%M:%S')
+                t_obj, fmt = parse_time_flexible(t_str)
+                if t_obj is not None:
+                    t_fmt = t_obj.strftime('%H:%M:%S')
                     if first_time is None:
-                        first_time = t_str
-                    last_time = t_str
-                except ValueError:
-                    pass
+                        first_time = t_fmt
+                    last_time = t_fmt
             if station:
                 if first_station is None:
                     first_station = station
