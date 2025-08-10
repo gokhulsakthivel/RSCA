@@ -274,7 +274,7 @@ def generate_chart(times: List[datetime.datetime], speeds: List[float], stations
         st_code = stations[full_idx]
         ax.axvline(times_ds[ds_idx], color='grey', lw=0.6, ls='--', alpha=0.6)
         if st_code and st_code not in used_label_codes:
-            ax.text(times_ds[ds_idx], -ymax * 0.08, st_code, rotation=90, va='top', ha='center', fontsize=7, fontweight='bold', clip_on=False)
+            ax.text(times_ds[ds_idx], -ymax * 0.08, st_code, rotation=90, va='top', ha='center', fontsize=11, fontweight='bold', clip_on=False)
             used_label_codes.add(st_code)
     ax.grid(alpha=0.3)
     segments = detect_station_stop_segments(times, speeds, stations, MIN_STOP_DURATION_SECONDS)
@@ -297,20 +297,14 @@ def generate_chart(times: List[datetime.datetime], speeds: List[float], stations
                 station_order.append(st)
         color_cycle = plt.rcParams['axes.prop_cycle'].by_key().get('color', ['#d62728','#2ca02c','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf'])
         colors = {st: color_cycle[i % len(color_cycle)] for i, st in enumerate(station_order)}
-        for st, start_t, end_t, _, _ in segments:
-            ax_stops.plot([start_t, end_t], [0,0], lw=6, solid_capstyle='butt', color=colors[st])
+    # for st, start_t, end_t, _, _ in segments:
+    #     ax_stops.plot([start_t, end_t], [0,0], lw=6, solid_capstyle='butt', color=colors[st])
         ax_stops.set_yticks([])
         ax_stops.set_xlabel('Time')
         ax_stops.set_xlim(times_ds[0], times_ds[-1])
         ax_stops.set_frame_on(False)
         ax_stops.grid(False)
-        from matplotlib.patches import Patch  # type: ignore
-        patches = [Patch(facecolor=colors[st], edgecolor='none', label=st) for st in station_order]
-        legend = ax.legend(handles=patches, title='Stops', loc='lower center', bbox_to_anchor=(0.5, -0.02), ncol=min(6, len(patches)), fontsize=8, frameon=False)
-        if legend.get_title():
-            legend.get_title().set_fontweight('bold')
-        for txt in legend.get_texts():
-            txt.set_fontweight('bold')
+    # Station legend hidden as requested
     else:
         ax_stops.text(0.5,0.5,'No qualifying stops', transform=ax_stops.transAxes, ha='center', va='center', fontsize=8)
         ax_stops.set_yticks([])
