@@ -46,20 +46,30 @@ def extract_date_from_filename(fname: str) -> Optional[datetime.date]:
 def parse_csv(path: str) -> Tuple[List[datetime.datetime], List[float], List[str], List[float]]:
     """Return (timestamps, speeds, stationCodes, distFromPrev in meters)."""
     base_date = extract_date_from_filename(os.path.basename(path)) or datetime.date.today()
+    # Initialize variables
     times: List[datetime.datetime] = []
     speeds: List[float] = []
     stations: List[str] = []
     dprev: List[float] = []
+    prev_datetime = None  # Track previous datetime for continuity check
     def parse_time_flexible(time_val):
-        # Try %H:%M:%S first
-        try:
-            return datetime.datetime.strptime(time_val, '%H:%M:%S').time()
-        except Exception:
-            pass
-        # Try %m/%d/%y %H:%M or %m/%d/%y %H:%M:%S
-        for fmt in ('%m/%d/%y %H:%M', '%m/%d/%y %H:%M:%S', '%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S'):
+        # Support various datetime formats
+        for fmt in (
+            '%d/%m/%Y %H:%M',     # DD/MM/YYYY HH:mm (primary format)
+            '%d/%m/%Y %H:%M:%S',  # DD/MM/YYYY HH:mm:ss
+            '%Y-%m-%d %H:%M:%S',  # YYYY-MM-DD HH:mm:ss
+            '%d/%m/%y %H:%M:%S',  # DD/MM/YY HH:mm:ss
+            '%H:%M:%S',           # HH:mm:ss (fallback to base_date)
+            '%H:%M',              # HH:mm (fallback to base_date)
+            '%m/%d/%y %H:%M:%S',  # Legacy format
+            '%m/%d/%Y %H:%M:%S',  # Legacy format
+        ):
             try:
-                return datetime.datetime.strptime(time_val, fmt).time()
+                parsed = datetime.datetime.strptime(time_val, fmt)
+                if fmt == '%H:%M:%S':
+                    # For time-only format, combine with base_date
+                    return parsed.time()
+                return parsed
             except Exception:
                 continue
         return None
@@ -84,16 +94,32 @@ def parse_csv(path: str) -> Tuple[List[datetime.datetime], List[float], List[str
             if not time_str or not speed_str:
                 dprev.append(0.0)
                 continue
-            t = parse_time_flexible(time_str)
-            if t is None:
+            t_obj = parse_time_flexible(time_str)
+            if t_obj is None:
                 dprev.append(0.0)
                 continue
-            dt = datetime.datetime.combine(base_date, t)
+                
+            # Handle datetime parsing
+            if not isinstance(t_obj, datetime.datetime):
+                # If we only got time component, skip this record as we need full datetime
+                dprev.append(0.0)
+                continue
+                
+            dt = t_obj
+            
+            # Validate datetime continuity
+            if prev_datetime is not None:
+                if dt < prev_datetime:
+                    # Skip records that go backwards in time
+                    dprev.append(0.0)
+                    continue
+                    
+            prev_datetime = dt
+
             try:
                 sp = float(speed_str)
                 if sp < 0.7:
                     sp = 0.0
-                sp = int(sp)
             except ValueError:
                 dprev.append(0.0)
                 continue
@@ -179,8 +205,10 @@ def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[fl
                 dist = dprev[i]
             dist_sum += dist
             decel_start = i
+            if speeds[i] == 0:  # Skip zero speed points
+                dist_sum = 0.0  # Reset distance sum
             i -= 1
-        # If decel_start == start_idx, not enough data, skip
+        # If decel_start == start_idx or no valid points found, skip
         if decel_start == start_idx:
             continue
         tw = times[decel_start:start_idx+1]

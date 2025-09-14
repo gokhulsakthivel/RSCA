@@ -56,6 +56,8 @@ def main():
             print('Warning: invalid --date, falling back to filename/date.')
     if base_date is None:
         base_date = extract_date_from_filename(os.path.basename(path)) or datetime.date.today()
+    
+    prev_datetime = None  # Track previous datetime for continuity check
 
     with open(path, 'r', encoding='utf-8-sig') as f:
         r = csv.reader(f)
@@ -72,15 +74,23 @@ def main():
     col_station = next((header_map[k] for k in header_map if k in ['last/cur stationcode', 'station_code', 'station', 'stationname', 'station_name']), 8)
 
     def parse_time_flexible(time_val):
-        # Try %H:%M:%S first
-        try:
-            return datetime.datetime.strptime(time_val, '%H:%M:%S').time()
-        except Exception:
-            pass
-        # Try %m/%d/%y %H:%M or %m/%d/%y %H:%M:%S
-        for fmt in ('%m/%d/%y %H:%M', '%m/%d/%y %H:%M:%S', '%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S'):
+        # Support various datetime formats
+        for fmt in (
+            '%d/%m/%Y %H:%M',     # DD/MM/YYYY HH:mm (primary format)
+            '%d/%m/%Y %H:%M:%S',  # DD/MM/YYYY HH:mm:ss
+            '%Y-%m-%d %H:%M:%S',  # YYYY-MM-DD HH:mm:ss
+            '%d/%m/%y %H:%M:%S',  # DD/MM/YY HH:mm:ss
+            '%H:%M:%S',           # HH:mm:ss (fallback to base_date)
+            '%H:%M',              # HH:mm (fallback to base_date)
+            '%m/%d/%y %H:%M:%S',  # Legacy format
+            '%m/%d/%Y %H:%M:%S',  # Legacy format
+        ):
             try:
-                return datetime.datetime.strptime(time_val, fmt).time()
+                parsed = datetime.datetime.strptime(time_val, fmt)
+                if fmt == '%H:%M:%S':
+                    # For time-only format, combine with base_date
+                    return parsed.time()
+                return parsed
             except Exception:
                 continue
         return None
@@ -94,14 +104,34 @@ def main():
         t_obj = parse_time_flexible(time_val)
         if t_obj is None:
             continue
+        
         speed_str = row[col_speed].strip()
         try:
             sp = float(speed_str)
+            if sp < 0.7:  # Handle very low speeds as zero
+                sp = 0.0
         except Exception:
             continue
+
+        # Handle datetime parsing
+        if not isinstance(t_obj, datetime.datetime):
+            # Skip records that don't have full datetime information
+            continue
+            
+        dt = t_obj
+        
+        # Validate datetime continuity
+        if prev_datetime is not None:
+            if dt < prev_datetime:
+                # Skip records that go backwards in time
+                continue
+                
+        prev_datetime = dt
+
         records.append({
             'dev': row[col_dev].strip(),
-            'time': t_obj.strftime('%H:%M:%S'),
+            'datetime': dt,
+            'time': dt.strftime('%H:%M:%S'),
             'speed': sp,
             'speed_raw': speed_str,
             'lat': row[col_lat].strip(),
@@ -118,8 +148,8 @@ def main():
             j = i + 1
             while j < n and records[j]['station'] == st and records[j]['speed'] == 0.0:
                 j += 1
-            t1 = datetime.datetime.strptime(records[i]['time'], '%H:%M:%S')
-            t2 = datetime.datetime.strptime(records[j - 1]['time'], '%H:%M:%S')
+            t1 = records[i]['datetime']
+            t2 = records[j - 1]['datetime']
             if (t2 - t1).total_seconds() >= min_stop:
                 halt_stations.add(st)
             i = j
@@ -140,7 +170,7 @@ def main():
     print('|' + '|'.join(['-'*(len(c)+2) for c in cols]) + '|')
     date_prefix = base_date.isoformat()
     for r in arrivals:
-        event_time = f"{date_prefix} {r['time']}"
+        event_time = r['datetime'].strftime('%Y-%m-%d %H:%M:%S')
         print('| {} | {} | {} | {} | {} | {} | {} | {} |'.format(
             r['dev'], loco_number, r['speed_raw'], r['station'], event_time, 'ARRIVAL(HALT)', r['lat'], r['lon']))
 
