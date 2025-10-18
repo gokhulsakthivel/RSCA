@@ -66,14 +66,16 @@ def parse_csv(path: str) -> Tuple[List[datetime.datetime], List[float], List[str
         ):
             try:
                 parsed = datetime.datetime.strptime(time_val, fmt)
-                if fmt == '%H:%M:%S':
-                    # For time-only format, combine with base_date
-                    return parsed.time()
+                # If the format is time-only, convert to a full datetime using base_date
+                if fmt in ('%H:%M:%S', '%H:%M'):
+                    # parsed is a datetime with today's date defaulted; extract time and combine
+                    return datetime.datetime.combine(base_date, parsed.time())
                 return parsed
             except Exception:
                 continue
         return None
 
+    # Read CSV rows first so we can do a two-pass parse and distribute seconds
     with open(path, 'r', encoding='utf-8-sig', newline='') as f:
         reader = csv.reader(f)
         header = next(reader, None)
@@ -83,56 +85,94 @@ def parse_csv(path: str) -> Tuple[List[datetime.datetime], List[float], List[str
         col_speed = next((header_map[k] for k in header_map if k in ['speed', 'loco_speed', 'speed(kmph)']), 2)
         col_station = next((header_map[k] for k in header_map if k in ['station_code', 'station', 'stationname', 'station_name']), 8)
         col_dist = next((header_map[k] for k in header_map if k in ['distance', 'dist', 'distancefromprev', 'distfromprev']), 6)
+        raw_rows = []
         for row in reader:
             if not row or all(not c.strip() for c in row):
                 continue
-            if len(row) < len(header):
+            if header and len(row) < len(header):
                 row += [''] * (len(header) - len(row))
-            time_str = row[col_time].strip()
-            speed_str = row[col_speed].strip()
+            time_str = row[col_time].strip() if col_time < len(row) else ''
+            speed_str = row[col_speed].strip() if col_speed < len(row) else ''
             station = row[col_station].strip() if col_station < len(row) else ''
-            if not time_str or not speed_str:
-                dprev.append(0.0)
-                continue
-            t_obj = parse_time_flexible(time_str)
-            if t_obj is None:
-                dprev.append(0.0)
-                continue
-                
-            # Handle datetime parsing
-            if not isinstance(t_obj, datetime.datetime):
-                # If we only got time component, skip this record as we need full datetime
-                dprev.append(0.0)
-                continue
-                
-            dt = t_obj
-            
-            # Validate datetime continuity
-            if prev_datetime is not None:
-                if dt < prev_datetime:
-                    # Skip records that go backwards in time
-                    dprev.append(0.0)
-                    continue
-                    
-            prev_datetime = dt
+            dist_str = row[col_dist].strip() if col_dist < len(row) else ''
+            raw_rows.append((time_str, speed_str, station, dist_str))
 
-            try:
-                sp = float(speed_str)
-                if sp < 0.7:
-                    sp = 0.0
-            except ValueError:
-                dprev.append(0.0)
-                continue
-            dist_val = 0.0
-            if col_dist < len(row):
-                try:
-                    dist_val = float(row[col_dist]) if row[col_dist].strip() else 0.0
-                except ValueError:
-                    dist_val = 0.0
-            times.append(dt)
-            speeds.append(sp)
-            stations.append(station)
-            dprev.append(dist_val)
+    # First pass: parse times and note if the original time token included seconds
+    parsed_times = [None] * len(raw_rows)
+    had_seconds = [False] * len(raw_rows)
+    parsed_speeds = [None] * len(raw_rows)
+    parsed_stations = [''] * len(raw_rows)
+    parsed_dprev = [0.0] * len(raw_rows)
+    for idx, (time_str, speed_str, station, dist_str) in enumerate(raw_rows):
+        if not time_str or not speed_str:
+            continue
+        # Determine if time token includes seconds (check last token after space)
+        time_part = time_str.split()[-1]
+        if time_part.count(':') == 2:
+            had_seconds[idx] = True
+        else:
+            had_seconds[idx] = False
+        t_obj = parse_time_flexible(time_str)
+        if t_obj is None or not isinstance(t_obj, datetime.datetime):
+            continue
+        parsed_times[idx] = t_obj
+        parsed_stations[idx] = station
+        try:
+            sp = float(speed_str)
+            if sp < 0.7:
+                sp = 0.0
+            parsed_speeds[idx] = sp
+        except ValueError:
+            parsed_speeds[idx] = None
+        try:
+            parsed_dprev[idx] = float(dist_str) if dist_str else 0.0
+        except ValueError:
+            parsed_dprev[idx] = 0.0
+
+    # Group minute-only samples and distribute seconds evenly within the minute
+    from collections import defaultdict
+    groups = defaultdict(list)  # key -> list of indices
+    for i, dt in enumerate(parsed_times):
+        if dt is None:
+            continue
+        minute_key = dt.replace(second=0, microsecond=0)
+        groups[minute_key].append(i)
+
+    # For each minute, if there are entries that lacked seconds, distribute seconds among them
+    for minute_key, indices in groups.items():
+        # Separate indices that originally had seconds vs not
+        nosec = [i for i in indices if not had_seconds[i]]
+        if len(nosec) <= 1:
+            # if single or none, leave as second=0 (already set by parse)
+            continue
+        # Distribute seconds evenly across the 0..59 range for these entries
+        N = len(nosec)
+        if N == 1:
+            seq = [0]
+        else:
+            seq = [int(round(i * 59.0 / (N - 1))) for i in range(N)]
+        # assign seconds preserving the order of appearance
+        for sec_val, idx in zip(seq, nosec):
+            base = parsed_times[idx].replace(second=0, microsecond=0)
+            parsed_times[idx] = base + datetime.timedelta(seconds=sec_val)
+
+    # Final pass: build output arrays in original order, applying continuity checks
+    prev_datetime = None
+    for i, dt in enumerate(parsed_times):
+        sp = parsed_speeds[i]
+        if dt is None or sp is None:
+            # keep dprev alignment by appending 0.0 where we skip
+            dprev.append(0.0)
+            continue
+        # Ensure monotonic time; if it goes backwards, skip the row
+        if prev_datetime is not None and dt < prev_datetime:
+            dprev.append(0.0)
+            continue
+        prev_datetime = dt
+        times.append(dt)
+        speeds.append(sp)
+        stations.append(parsed_stations[i])
+        dprev.append(parsed_dprev[i])
     return times, speeds, stations, dprev
 
 # --- Station stop detection ---------------------------------------------------
@@ -208,12 +248,16 @@ def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[fl
             if speeds[i] == 0:  # Skip zero speed points
                 dist_sum = 0.0  # Reset distance sum
             i -= 1
-        # If decel_start == start_idx or no valid points found, skip
-        if decel_start == start_idx:
+        # If we didn't find any valid prior samples, skip
+        if decel_start >= start_idx:
             continue
-        tw = times[decel_start:start_idx+1]
-        sw = speeds[decel_start:start_idx+1]
-        dseg = dprev[decel_start:start_idx+1] if len(dprev) >= start_idx+1 else [0]*(start_idx+1-decel_start)
+        # Use explicit start/end indices and include every sample between them (inclusive)
+        start_idx_plot = max(0, decel_start)
+        end_idx_plot = start_idx
+        tw = [times[k] for k in range(start_idx_plot, end_idx_plot + 1)]
+        sw = [speeds[k] for k in range(start_idx_plot, end_idx_plot + 1)]
+        # dprev aligns with samples; provide zeros if missing
+        dseg = [dprev[k] if k < len(dprev) else 0.0 for k in range(start_idx_plot, end_idx_plot + 1)]
         if not tw:
             continue
         max_speed = max(sw) if sw else 0
@@ -234,7 +278,18 @@ def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[fl
         except Exception:
             return
         fig, ax = plt.subplots(figsize=(8,3))
-        ax.plot(tw, sw, color='#ff7f0e', lw=1.5)
+        # Debug: print segment statistics so we can see sampling density
+        try:
+            span_s = (times[start_idx] - tw[0]).total_seconds()
+            deltas = [(tw[i+1] - tw[i]).total_seconds() for i in range(len(tw)-1)] if len(tw) > 1 else [0]
+            avg_dt = sum(deltas)/len(deltas) if deltas else 0
+        except Exception:
+            span_s = 0
+            avg_dt = 0
+        print(f'Decel {st} #{seq}: samples={len(tw)}, span_s={span_s:.1f}, avg_dt_s={avg_dt:.3f}')
+        # Plot as a connected line chart so deceleration appears as a continuous curve
+        ax.plot(tw, sw, color='#ff7f0e', lw=1.2, marker='o', markersize=3, alpha=0.95)
+        # Vertical line at halt (datetime)
         ax.axvline(times[start_idx], color='red', ls='--', lw=0.9, label='Halt (0)')
         if idx_120 is not None and 0 <= idx_120 < len(tw):
             ax.axvline(tw[idx_120], color='blue', ls=':', lw=0.9, label='120m to stop')
@@ -242,8 +297,8 @@ def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[fl
             ax.axvline(tw[idx_60], color='green', ls=':', lw=0.9, label='60m to stop')
         from matplotlib.lines import Line2D
         custom_lines = [Line2D([0], [0], color='red', ls='--', lw=0.9, label='Halt (0)'),
-                       Line2D([0], [0], color='blue', ls=':', lw=0.9, label='120m to stop'),
-                       Line2D([0], [0], color='green', ls=':', lw=0.9, label='60m to stop')]
+                        Line2D([0], [0], color='blue', ls=':', lw=0.9, label='120m to stop'),
+                        Line2D([0], [0], color='green', ls=':', lw=0.9, label='60m to stop')]
         ax.set_title(f'{st} Stop: Last 1km to 0 kmph')
         ax.set_xlabel('Time')
         ax.set_ylabel('Speed (km/h)')
@@ -251,7 +306,40 @@ def generate_deceleration_charts(times: List[datetime.datetime], speeds: List[fl
         ax.text(tw[0], max_speed*0.9 if max_speed>0 else 0.1, f'Start {first_speed:.1f}', color='#ff7f0e', fontsize=8, ha='left')
         ax.text(times[start_idx], (max_speed*0.2) if max_speed>0 else 0.1, '0', color='red', fontsize=8, ha='right')
         ax.legend(handles=custom_lines, frameon=False, fontsize=8)
-        fig.autofmt_xdate()
+        # Force x-axis to show every second (1 tick = 1 second) and format as H:M:S
+        try:
+            import matplotlib.dates as mdates  # type: ignore
+            ax.set_xlim(tw[0], times[start_idx])
+            # Adaptive tick interval based on segment span, but limit tick count
+            try:
+                span_s = (times[start_idx] - tw[0]).total_seconds()
+            except Exception:
+                span_s = 0
+            # target number of ticks to display on the decel chart
+            target_ticks = 6
+            if span_s <= 0:
+                sec = 1
+            else:
+                desired_interval = max(1, int(round(span_s / target_ticks)))
+                # choose a 'nice' interval from this set (seconds)
+                nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+                sec = next((v for v in nice if v >= desired_interval), desired_interval)
+            # Pick a sensible locator/formatter depending on chosen interval
+            if sec < 60:
+                locator = mdates.SecondLocator(interval=sec)
+                fmt = '%H:%M:%S'
+            else:
+                locator = mdates.MinuteLocator(interval=max(1, sec // 60))
+                fmt = '%H:%M'
+            ax.xaxis.set_major_locator(locator)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter(fmt))
+            fig.autofmt_xdate(rotation=30)
+        except Exception:
+            # Fallback to automatic formatting if date locators aren't available
+            try:
+                fig.autofmt_xdate()
+            except Exception:
+                pass
         out_base = f"{output_prefix}_{st}_{seq}_decel"
         exts = ['svg'] + (['png'] if PNG_OUTPUT else [])
         for ext in exts:
@@ -338,7 +426,21 @@ def generate_chart(times: List[datetime.datetime], speeds: List[float], stations
         ax_stops.set_yticks([])
         ax_stops.set_xlabel('Time')
         ax_stops.set_frame_on(False)
-    fig.autofmt_xdate()
+    # Improve x-axis readability by selecting locator/formatter based on total span
+    try:
+        import matplotlib.dates as mdates  # type: ignore
+        span_total_s = (times_ds[-1] - times_ds[0]).total_seconds() if len(times_ds) > 1 else 0
+        # Use AutoDateLocator but cap number of ticks to avoid overcrowding
+        locator = mdates.AutoDateLocator(minticks=3, maxticks=8)
+        fmt = '%H:%M' if span_total_s <= 86400 else '%Y-%m-%d %H:%M'
+        ax_stops.xaxis.set_major_locator(locator)
+        ax_stops.xaxis.set_major_formatter(mdates.DateFormatter(fmt))
+        for lbl in ax_stops.get_xticklabels():
+            lbl.set_rotation(30)
+            lbl.set_ha('right')
+        fig.autofmt_xdate()
+    except Exception:
+        fig.autofmt_xdate()
     exts = ['svg'] + (['png'] if PNG_OUTPUT else [])
     for ext in exts:
         out = f'{output_prefix}.{ext}'
