@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test docx Library</title>
+</head>
+<body>
+    <h1>Testing docx Library Loading</h1>
+    <div id="status">Loading...</div>
+    <button id="testBtn" style="margin-top: 20px; padding: 10px 20px;">Test docx Library</button>
+    
+    <script src="https://unpkg.com/docx@7.8.2/build/index.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    
+    <script>
+        setTimeout(() => {
+            const statusDiv = document.getElementById('status');
+            
+            console.log('window.docx:', window.docx);
+            console.log('Type of window.docx:', typeof window.docx);
+            console.log('All window properties with "doc":', Object.keys(window).filter(k => k.toLowerCase().includes('doc')));
+            
+            if (window.docx) {
+                statusDiv.innerHTML = '<span style="color: green;">✓ docx library loaded successfully!</span><br>';
+                statusDiv.innerHTML += 'Available exports: ' + Object.keys(window.docx).slice(0, 10).join(', ') + '...';
+            } else {
+                statusDiv.innerHTML = '<span style="color: red;">✗ docx library NOT loaded</span>';
+            }
+        }, 1000);
+        
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            try {
+                if (!window.docx) {
+                    alert('docx library not loaded!');
+                    return;
+                }
+                
+                const { Document, Packer, Paragraph, TextRun } = window.docx;
+                
+                const doc = new Document({
+                    sections: [{
+                        properties: {},
+                        children: [
+                            new Paragraph({
+                                children: [
+                                    new TextRun({
+                                        text: "Test Document",
+                                        bold: true,
+                                        size: 28
+                                    })
+                                ]
+                            }),
+                            new Paragraph({
+                                children: [
+                                    new TextRun("This is a test document created using docx.js")
+                                ]
+                            })
+                        ]
+                    }]
+                });
+                
+                const blob = await Packer.toBlob(doc);
+                saveAs(blob, "test-document.docx");
+                
+                alert('Test document created successfully! Check your downloads.');
+            } catch (error) {
+                alert('Error: ' + error.message);
+                console.error('Full error:', error);
+            }
+        });
+    </script>
+</body>
+</html>
+
