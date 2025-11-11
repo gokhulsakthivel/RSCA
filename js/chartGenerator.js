@@ -309,12 +309,20 @@ const ChartGenerator = {
             },
             shapes: shapes,
             annotations: annotations,
-            height: 350,
+            height: 450,
             showlegend: true,
             legend: {
-                x: 1,
-                xanchor: 'right',
-                y: 1
+                x: 0.5,
+                xanchor: 'center',
+                y: -0.25,
+                yanchor: 'top',
+                orientation: 'h'
+            },
+            margin: {
+                b: 120,
+                t: 60,
+                l: 60,
+                r: 40
             }
         };
 
