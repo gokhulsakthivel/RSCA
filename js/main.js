@@ -127,6 +127,9 @@ function initializeApp() {
         generateAnalysis();
     });
     
+    // Initialize compare mode
+    initCompareMode();
+    
     console.log('Application initialized');
 }
 
@@ -518,5 +521,333 @@ function hideDownloadProgress() {
 function showError(message) {
     alert('Error: ' + message);
     console.error(message);
+}
+
+// ============================================================
+// MULTI-TRAIN COMPARE MODE
+// ============================================================
+
+/** Current mode: 'single' or 'compare' */
+let currentMode = 'single';
+
+/** Selected common stations for comparison */
+let selectedCompareStations = new Set();
+
+/**
+ * Switch between Single Analysis and Multi-Train Compare modes
+ * @param {string} mode - 'single' or 'compare'
+ */
+function switchMode(mode) {
+    currentMode = mode;
+    const singleSection = document.getElementById('singleSection');
+    const compareSection = document.getElementById('compareSection');
+    const modeSingleBtn = document.getElementById('modeSingle');
+    const modeCompareBtn = document.getElementById('modeCompare');
+
+    if (mode === 'single') {
+        singleSection.style.display = 'block';
+        compareSection.style.display = 'none';
+        modeSingleBtn.classList.add('active');
+        modeCompareBtn.classList.remove('active');
+    } else {
+        singleSection.style.display = 'none';
+        compareSection.style.display = 'block';
+        modeSingleBtn.classList.remove('active');
+        modeCompareBtn.classList.add('active');
+    }
+}
+
+/**
+ * Initialize compare mode event listeners
+ */
+function initCompareMode() {
+    const compareDropZone = document.getElementById('compareDropZone');
+    const compareFileInput = document.getElementById('compareFileInput');
+
+    if (!compareDropZone || !compareFileInput) return;
+
+    compareDropZone.addEventListener('click', (e) => {
+        // Avoid triggering if the upload-link anchor was clicked (it handles its own click)
+        if (e.target.closest('.upload-link')) return;
+        compareFileInput.click();
+    });
+
+    compareDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        compareDropZone.classList.add('drag-over');
+    });
+
+    compareDropZone.addEventListener('dragleave', () => {
+        compareDropZone.classList.remove('drag-over');
+    });
+
+    compareDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        compareDropZone.classList.remove('drag-over');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleCompareFiles(files);
+        }
+    });
+
+    compareFileInput.addEventListener('change', (e) => {
+        const files = e.target.files;
+        if (files.length > 0) {
+            handleCompareFiles(files);
+        }
+    });
+
+    // Generate comparison button
+    const generateCompareBtn = document.getElementById('generateCompareBtn');
+    if (generateCompareBtn) {
+        generateCompareBtn.addEventListener('click', () => {
+            generateComparison();
+        });
+    }
+}
+
+/**
+ * Handle multiple file selection for comparison
+ * @param {FileList} files - Selected files
+ */
+async function handleCompareFiles(files) {
+    const csvFiles = Array.from(files).filter(f => f.name.endsWith('.csv'));
+
+    if (csvFiles.length < 2) {
+        showError('Please select at least 2 CSV files for comparison');
+        return;
+    }
+
+    MultiCompare.reset();
+    showCompareProgress('Processing files...');
+
+    // Hide previous results
+    document.getElementById('compareConfigSection').style.display = 'none';
+    document.getElementById('compareResultsContainer').style.display = 'none';
+
+    try {
+        for (let i = 0; i < csvFiles.length; i++) {
+            const file = csvFiles[i];
+            showCompareProgress(`Parsing file ${i + 1} of ${csvFiles.length}: ${file.name}`);
+
+            const content = await readFileAsync(file);
+            const csvData = await CSVParser.parseCSV(content);
+
+            const overrides = {};
+            const baseInfo = BaseInfo.generateBaseInfo(csvData, file.name, overrides);
+
+            const baseDate = baseInfo.date ? new Date(baseInfo.date) : new Date();
+            const processedData = DataProcessor.processData(csvData, baseDate);
+
+            if (processedData.times.length === 0) {
+                console.warn(`File ${file.name} has no valid data, skipping`);
+                continue;
+            }
+
+            MultiCompare.addFile(file.name, csvData, processedData, baseInfo);
+        }
+
+        hideCompareProgress();
+
+        if (MultiCompare.files.length < 2) {
+            showError('Need at least 2 valid CSV files for comparison');
+            return;
+        }
+
+        // Show uploaded file list
+        displayCompareFileList();
+
+        // Find common halt stations and show config
+        showCompareConfig();
+
+    } catch (error) {
+        hideCompareProgress();
+        showError('Error processing files: ' + error.message);
+        console.error(error);
+    }
+}
+
+/**
+ * Read a file as text (promise-based)
+ * @param {File} file
+ * @returns {Promise<string>}
+ */
+function readFileAsync(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('Error reading file: ' + file.name));
+        reader.readAsText(file);
+    });
+}
+
+/**
+ * Display list of uploaded files with color indicators
+ */
+function displayCompareFileList() {
+    const listContainer = document.getElementById('compareFileList');
+    const itemsContainer = document.getElementById('compareFileItems');
+    itemsContainer.innerHTML = '';
+
+    MultiCompare.files.forEach((file, idx) => {
+        const color = MultiCompare.trainColors[idx % MultiCompare.trainColors.length];
+        const item = document.createElement('div');
+        item.className = 'compare-file-item';
+        item.innerHTML = `
+            <span class="compare-file-color" style="background: ${color};"></span>
+            <span class="compare-file-name">${file.label}</span>
+            <span class="compare-file-records">${file.processedData.times.length.toLocaleString()} records</span>
+        `;
+        itemsContainer.appendChild(item);
+    });
+
+    listContainer.style.display = 'block';
+}
+
+/**
+ * Show compare configuration with common stations
+ */
+function showCompareConfig() {
+    const commonStations = MultiCompare.findCommonHaltStations();
+    const configSection = document.getElementById('compareConfigSection');
+    const chipsContainer = document.getElementById('commonStationChips');
+    chipsContainer.innerHTML = '';
+    selectedCompareStations.clear();
+
+    if (commonStations.length === 0) {
+        chipsContainer.innerHTML = '<p style="color: var(--color-text-muted);">No common halt stations found across all uploaded files.</p>';
+        configSection.style.display = 'block';
+        configSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+    }
+
+    // Create chips for each common station
+    commonStations.forEach(station => {
+        const chip = document.createElement('button');
+        chip.className = 'station-chip';
+        chip.textContent = station;
+        chip.dataset.station = station;
+        chip.addEventListener('click', () => {
+            chip.classList.toggle('selected');
+            if (selectedCompareStations.has(station)) {
+                selectedCompareStations.delete(station);
+            } else {
+                selectedCompareStations.add(station);
+            }
+            updateSelectAllState();
+        });
+        chipsContainer.appendChild(chip);
+    });
+
+    // "Select All" button
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.className = 'station-chip select-all-chip';
+    selectAllBtn.textContent = 'Select All';
+    selectAllBtn.id = 'selectAllChip';
+    selectAllBtn.addEventListener('click', () => {
+        const allSelected = selectedCompareStations.size === commonStations.length;
+        const chips = chipsContainer.querySelectorAll('.station-chip:not(.select-all-chip)');
+        if (allSelected) {
+            // Deselect all
+            selectedCompareStations.clear();
+            chips.forEach(c => c.classList.remove('selected'));
+            selectAllBtn.classList.remove('selected');
+            selectAllBtn.textContent = 'Select All';
+        } else {
+            // Select all
+            commonStations.forEach(s => selectedCompareStations.add(s));
+            chips.forEach(c => c.classList.add('selected'));
+            selectAllBtn.classList.add('selected');
+            selectAllBtn.textContent = 'Deselect All';
+        }
+    });
+    chipsContainer.prepend(selectAllBtn);
+
+    configSection.style.display = 'block';
+    configSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * Update Select All button state based on current selection
+ */
+function updateSelectAllState() {
+    const commonStations = MultiCompare.findCommonHaltStations();
+    const selectAllBtn = document.getElementById('selectAllChip');
+    if (!selectAllBtn) return;
+
+    if (selectedCompareStations.size === commonStations.length) {
+        selectAllBtn.classList.add('selected');
+        selectAllBtn.textContent = 'Deselect All';
+    } else {
+        selectAllBtn.classList.remove('selected');
+        selectAllBtn.textContent = 'Select All';
+    }
+}
+
+/**
+ * Generate comparison charts for selected stations
+ */
+function generateComparison() {
+    if (selectedCompareStations.size === 0) {
+        showError('Please select at least one station');
+        return;
+    }
+
+    const config = {
+        decelDistance: parseInt(document.getElementById('compareDecelDistance').value) || 1000,
+        decelMarkers: parseMarkers(document.getElementById('compareDecelMarkers').value)
+    };
+
+    const stations = Array.from(selectedCompareStations);
+
+    // Generate charts
+    MultiCompare.generateAllComparisonCharts(stations, 'compareChartsContainer', config);
+
+    // Show train legend
+    displayCompareTrainLegend();
+
+    // Show results
+    const resultsContainer = document.getElementById('compareResultsContainer');
+    resultsContainer.style.display = 'block';
+    resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * Display the train legend in comparison results
+ */
+function displayCompareTrainLegend() {
+    const container = document.getElementById('compareTrainLegend');
+    container.innerHTML = '';
+
+    MultiCompare.files.forEach((file, idx) => {
+        const color = MultiCompare.trainColors[idx % MultiCompare.trainColors.length];
+        const item = document.createElement('div');
+        item.className = 'compare-legend-item';
+        item.innerHTML = `
+            <span class="compare-legend-color" style="background: ${color};"></span>
+            <span class="compare-legend-label">${file.label}</span>
+            <span class="compare-legend-detail">${file.baseInfo.section || ''} &middot; ${file.baseInfo.date || ''}</span>
+        `;
+        container.appendChild(item);
+    });
+}
+
+/**
+ * Show compare progress
+ * @param {string} message
+ */
+function showCompareProgress(message) {
+    const bar = document.getElementById('compareProgressBar');
+    const text = bar.querySelector('.progress-text');
+    text.textContent = message;
+    bar.style.display = 'block';
+}
+
+/**
+ * Hide compare progress
+ */
+function hideCompareProgress() {
+    const bar = document.getElementById('compareProgressBar');
+    bar.style.display = 'none';
 }
 
