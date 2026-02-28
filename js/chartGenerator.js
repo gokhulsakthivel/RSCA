@@ -6,6 +6,60 @@
 const ChartGenerator = {
     MIN_STOP_DURATION_SECONDS: 1,
 
+    /** Design system chart palette */
+    palette: {
+        primary: '#6C5CE7',
+        primaryLight: '#A29BFE',
+        primaryFaded: 'rgba(108, 92, 231, 0.12)',
+        surface: '#FFFFFF',
+        text: '#1A1A2E',
+        textSecondary: '#6B7280',
+        textMuted: '#9CA3AF',
+        border: '#E5E7EB',
+        gridColor: 'rgba(229, 231, 235, 0.5)',
+        red: '#E74C3C',
+        green: '#27AE60',
+        orange: '#F39C12',
+        blue: '#3498DB',
+    },
+
+    /** Shared layout defaults for all charts */
+    baseLayout() {
+        return {
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: 'transparent',
+            font: {
+                family: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                color: this.palette.textSecondary,
+                size: 12
+            },
+            xaxis: {
+                showgrid: false,
+                zeroline: false,
+                linecolor: this.palette.border,
+                linewidth: 1,
+                tickfont: { color: this.palette.textMuted, size: 11 },
+                title: { font: { color: this.palette.textSecondary, size: 12 } }
+            },
+            yaxis: {
+                showgrid: true,
+                gridcolor: this.palette.gridColor,
+                gridwidth: 1,
+                griddash: 'solid',
+                zeroline: false,
+                linecolor: this.palette.border,
+                linewidth: 1,
+                tickfont: { color: this.palette.textMuted, size: 11 },
+                title: { font: { color: this.palette.textSecondary, size: 12 } }
+            },
+            hoverlabel: {
+                bgcolor: this.palette.primary,
+                font: { color: '#fff', family: "'Inter', sans-serif", size: 12 },
+                bordercolor: this.palette.primary
+            }
+        };
+    },
+
     /**
      * Generate main speed vs time chart
      * @param {Object} processedData - Processed data
@@ -38,14 +92,28 @@ const ChartGenerator = {
             times, speeds, stations, this.MIN_STOP_DURATION_SECONDS
         );
 
-        // Main speed trace
+        // Main speed trace — smooth area fill, line only (no markers on every point)
         const trace = {
             x: plotTimes,
             y: plotSpeeds,
             type: 'scatter',
             mode: 'lines',
             name: 'Speed',
-            line: { color: '#1f77b4', width: 1.5 },
+            line: {
+                color: this.palette.primary,
+                width: 2.5,
+                shape: 'spline',
+                smoothing: 1.0
+            },
+            fill: 'tozeroy',
+            fillgradient: {
+                type: 'vertical',
+                colorscale: [
+                    [0, 'rgba(108, 92, 231, 0)'],
+                    [1, 'rgba(108, 92, 231, 0.25)']
+                ]
+            },
+            fillcolor: 'rgba(108, 92, 231, 0.10)',
             hovertemplate: '<b>Time:</b> %{x|%H:%M:%S}<br><b>Speed:</b> %{y:.1f} km/h<extra></extra>'
         };
 
@@ -62,8 +130,8 @@ const ChartGenerator = {
                 x1: segment.startTime,
                 y0: 0,
                 y1: Math.max(...plotSpeeds),
-                line: { color: 'grey', width: 1, dash: 'dash' },
-                opacity: 0.6
+                line: { color: this.palette.textMuted, width: 1, dash: 'dot' },
+                opacity: 0.5
             });
 
             // Station label (avoid duplicates)
@@ -75,33 +143,43 @@ const ChartGenerator = {
                     showarrow: false,
                     textangle: -90,
                     yanchor: 'top',
-                    font: { size: 11, color: '#333' },
+                    font: { size: 10, color: this.palette.textMuted, family: "'Inter', sans-serif" },
                     yshift: -10
                 });
                 usedStationCodes.add(segment.station);
             }
         });
 
+        const base = this.baseLayout();
         const layout = {
-            title: 'Speed vs Time (Stop intervals marked)',
+            ...base,
+            title: {
+                text: 'Speed vs Time (Stop intervals marked)',
+                font: { size: 14, color: this.palette.text, family: "'Inter', sans-serif" },
+                x: 0,
+                xanchor: 'left',
+                pad: { l: 8 }
+            },
             xaxis: {
-                title: 'Time',
+                ...base.xaxis,
+                title: { text: 'Time', font: { color: this.palette.textSecondary, size: 12 } },
                 type: 'date',
                 tickformat: '%H:%M:%S'
             },
             yaxis: {
-                title: 'Speed (km/h)'
+                ...base.yaxis,
+                title: { text: 'Speed (km/h)', font: { color: this.palette.textSecondary, size: 12 } }
             },
-            hovermode: 'closest',
+            hovermode: 'x unified',
             shapes: shapes,
             annotations: annotations,
             height: 500,
-            margin: { b: 100 }
+            margin: { b: 100, t: 56, l: 56, r: 24 }
         };
 
         const config = {
             responsive: true,
-            displayModeBar: true,
+            displayModeBar: false,
             displaylogo: false
         };
 
@@ -230,15 +308,21 @@ const ChartGenerator = {
         const maxSpeed = Math.max(...speeds);
         const firstSpeed = speeds[0];
 
-        // Main trace
+        // Main trace — smooth area with gradient fill, lines only
         const trace = {
             x: times,
             y: speeds,
             type: 'scatter',
-            mode: 'lines+markers',
+            mode: 'lines',
             name: 'Speed',
-            line: { color: '#ff7f0e', width: 2 },
-            marker: { size: 4 },
+            line: {
+                color: this.palette.primary,
+                width: 2.5,
+                shape: 'spline',
+                smoothing: 1.0
+            },
+            fill: 'tozeroy',
+            fillcolor: 'rgba(108, 92, 231, 0.10)',
             hovertemplate: '<b>Time:</b> %{x|%H:%M:%S}<br><b>Speed:</b> %{y:.1f} km/h<extra></extra>'
         };
 
@@ -250,12 +334,12 @@ const ChartGenerator = {
                 x1: haltTime,
                 y0: 0,
                 y1: maxSpeed,
-                line: { color: 'red', width: 2, dash: 'dash' }
+                line: { color: this.palette.red, width: 2, dash: 'dash' }
             }
         ];
 
         // Colors for different markers
-        const markerColors = ['blue', 'green', 'orange', 'purple', 'brown'];
+        const markerColors = [this.palette.blue, this.palette.green, this.palette.orange, this.palette.primary, '#8D6E63'];
         
         // Add vertical lines for each marker
         markerDistances.forEach((markerDist, idx) => {
@@ -283,7 +367,7 @@ const ChartGenerator = {
                 y: maxSpeed * 0.9,
                 text: `Start ${firstSpeed.toFixed(1)}`,
                 showarrow: false,
-                font: { size: 10, color: '#ff7f0e' },
+                font: { size: 10, color: this.palette.primary, family: "'Inter', sans-serif" },
                 xanchor: 'left'
             },
             {
@@ -291,21 +375,31 @@ const ChartGenerator = {
                 y: maxSpeed * 0.2,
                 text: '0',
                 showarrow: false,
-                font: { size: 10, color: 'red' },
+                font: { size: 10, color: this.palette.red, family: "'Inter', sans-serif" },
                 xanchor: 'right'
             }
         ];
 
+        const decelBase = this.baseLayout();
         const layout = {
-            title: `${station} Stop: Last ${decelDistance}m to 0 kmph`,
+            ...decelBase,
+            title: {
+                text: `${station} Stop: Last ${decelDistance}m to 0 kmph`,
+                font: { size: 13, color: this.palette.text, family: "'Inter', sans-serif" },
+                x: 0,
+                xanchor: 'left',
+                pad: { l: 8 }
+            },
             xaxis: {
-                title: 'Time',
+                ...decelBase.xaxis,
+                title: { text: 'Time', font: { color: this.palette.textSecondary, size: 12 } },
                 type: 'date',
                 tickformat: '%H:%M:%S',
                 range: [times[0], haltTime]
             },
             yaxis: {
-                title: 'Speed (km/h)'
+                ...decelBase.yaxis,
+                title: { text: 'Speed (km/h)', font: { color: this.palette.textSecondary, size: 12 } }
             },
             shapes: shapes,
             annotations: annotations,
@@ -316,19 +410,21 @@ const ChartGenerator = {
                 xanchor: 'center',
                 y: -0.25,
                 yanchor: 'top',
-                orientation: 'h'
+                orientation: 'h',
+                font: { size: 11, color: this.palette.textSecondary }
             },
             margin: {
                 b: 120,
-                t: 60,
-                l: 60,
-                r: 40
+                t: 56,
+                l: 56,
+                r: 24
             }
         };
 
         // Add legend traces
         const legendTraces = [trace];
         
+
         // Add halt legend
         legendTraces.push({
             x: [null],
@@ -336,7 +432,7 @@ const ChartGenerator = {
             type: 'scatter',
             mode: 'lines',
             name: 'Halt (0)',
-            line: { color: 'red', width: 2, dash: 'dash' },
+            line: { color: this.palette.red, width: 2, dash: 'dash' },
             showlegend: true
         });
         
@@ -361,7 +457,7 @@ const ChartGenerator = {
 
         const config = {
             responsive: true,
-            displayModeBar: true,
+            displayModeBar: false,
             displaylogo: false
         };
 
