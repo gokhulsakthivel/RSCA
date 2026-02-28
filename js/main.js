@@ -604,6 +604,14 @@ function initCompareMode() {
             generateComparison();
         });
     }
+
+    // Download braking pattern report button
+    const downloadCompareBtn = document.getElementById('downloadCompareBtn');
+    if (downloadCompareBtn) {
+        downloadCompareBtn.addEventListener('click', () => {
+            downloadBrakingPatternReport();
+        });
+    }
 }
 
 /**
@@ -800,15 +808,24 @@ function generateComparison() {
 
     const stations = Array.from(selectedCompareStations);
 
-    // Generate charts
-    MultiCompare.generateAllComparisonCharts(stations, 'compareChartsContainer', config);
-
     // Show train legend
     displayCompareTrainLegend();
 
-    // Show results
+    // Show results container BEFORE generating charts so Plotly can measure full width
     const resultsContainer = document.getElementById('compareResultsContainer');
     resultsContainer.style.display = 'block';
+
+    // Generate charts (container is now visible so Plotly gets correct width)
+    MultiCompare.generateAllComparisonCharts(stations, 'compareChartsContainer', config);
+
+    // Resize all charts to ensure full width after layout settles
+    requestAnimationFrame(() => {
+        const chartDivs = document.querySelectorAll('#compareChartsContainer [id^="compare-chart-"]');
+        chartDivs.forEach(div => {
+            Plotly.Plots.resize(div);
+        });
+    });
+
     resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -849,5 +866,207 @@ function showCompareProgress(message) {
 function hideCompareProgress() {
     const bar = document.getElementById('compareProgressBar');
     bar.style.display = 'none';
+}
+
+/**
+ * Download braking pattern analysis as a Word document
+ */
+async function downloadBrakingPatternReport() {
+    try {
+        const progressBar = document.getElementById('compareDownloadProgressBar');
+        const progressText = progressBar.querySelector('.progress-text');
+        progressBar.style.display = 'block';
+        progressText.textContent = 'Capturing charts...';
+
+        let docxLib = window.docx;
+        if (!docxLib) {
+            throw new Error('docx library not loaded. Please refresh the page.');
+        }
+
+        const { Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType, AlignmentType, HeadingLevel, ImageRun } = docxLib;
+
+        // Capture comparison chart images
+        const chartImages = [];
+        const compareContainer = document.getElementById('compareChartsContainer');
+        if (compareContainer) {
+            const chartDivs = compareContainer.querySelectorAll('.decel-chart-item');
+            for (let i = 0; i < chartDivs.length; i++) {
+                progressText.textContent = `Capturing chart ${i + 1} of ${chartDivs.length}...`;
+                try {
+                    const canvas = await html2canvas(chartDivs[i], {
+                        scale: 2,
+                        logging: false,
+                        backgroundColor: '#ffffff'
+                    });
+                    const imageData = canvas.toDataURL('image/png');
+                    const base64Data = imageData.split(',')[1];
+
+                    chartImages.push({
+                        image: new ImageRun({
+                            data: Uint8Array.from(atob(base64Data), c => c.charCodeAt(0)),
+                            transformation: {
+                                width: 600,
+                                height: Math.round((canvas.height * 600) / canvas.width)
+                            }
+                        }),
+                        stationId: chartDivs[i].querySelector('[id^="compare-chart-"]')?.id || chartDivs[i].id || `chart-${i + 1}`
+                    });
+                } catch (err) {
+                    console.error('Error capturing chart:', err);
+                }
+            }
+        }
+
+        progressText.textContent = 'Building document...';
+
+        // Build train summary table rows
+        const trainSummaryRows = MultiCompare.files.map((file, idx) => {
+            const color = MultiCompare.trainColors[idx % MultiCompare.trainColors.length];
+            return new TableRow({
+                children: [
+                    new TableCell({
+                        children: [new Paragraph({ text: String(idx + 1) })],
+                        width: { size: 10, type: WidthType.PERCENTAGE }
+                    }),
+                    new TableCell({
+                        children: [new Paragraph({
+                            children: [new TextRun({ text: file.label, bold: true })]
+                        })],
+                        width: { size: 35, type: WidthType.PERCENTAGE }
+                    }),
+                    new TableCell({
+                        children: [new Paragraph({ text: file.baseInfo.section || '-' })],
+                        width: { size: 25, type: WidthType.PERCENTAGE }
+                    }),
+                    new TableCell({
+                        children: [new Paragraph({ text: file.baseInfo.date || '-' })],
+                        width: { size: 15, type: WidthType.PERCENTAGE }
+                    }),
+                    new TableCell({
+                        children: [new Paragraph({ text: file.processedData.times.length.toLocaleString() })],
+                        width: { size: 15, type: WidthType.PERCENTAGE }
+                    })
+                ]
+            });
+        });
+
+        // Train summary table header
+        const trainHeaderRow = new TableRow({
+            children: ['#', 'Train / Pilot', 'Section', 'Date', 'Records'].map(h =>
+                new TableCell({
+                    children: [new Paragraph({
+                        children: [new TextRun({ text: h, bold: true, color: "FFFFFF" })]
+                    })],
+                    shading: { fill: "667EEA", color: "auto" }
+                })
+            ),
+            tableHeader: true
+        });
+
+        // Configuration info
+        const decelDist = document.getElementById('compareDecelDistance').value || '1000';
+        const decelMarkers = document.getElementById('compareDecelMarkers').value || '120,60';
+        const selectedStations = Array.from(selectedCompareStations).join(', ');
+
+        const configRows = [
+            ['Selected Stations', selectedStations],
+            ['Deceleration Distance', `${decelDist}m`],
+            ['Deceleration Markers', `${decelMarkers}m`]
+        ].map(row =>
+            new TableRow({
+                children: [
+                    new TableCell({
+                        children: [new Paragraph({ text: row[0] })],
+                        shading: { fill: "F8F9FF", color: "auto" },
+                        width: { size: 40, type: WidthType.PERCENTAGE }
+                    }),
+                    new TableCell({
+                        children: [new Paragraph({ text: row[1] })],
+                        width: { size: 60, type: WidthType.PERCENTAGE }
+                    })
+                ]
+            })
+        );
+
+        // Build document sections
+        const children = [
+            new Paragraph({
+                text: "Braking Pattern Analysis Report",
+                heading: HeadingLevel.HEADING_1,
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 400 }
+            }),
+
+            new Paragraph({
+                text: "Trains Compared",
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 200, after: 200 }
+            }),
+
+            new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                rows: [trainHeaderRow, ...trainSummaryRows]
+            }),
+
+            new Paragraph({
+                text: "Analysis Configuration",
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 400, after: 200 }
+            }),
+
+            new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                rows: configRows
+            }),
+
+            new Paragraph({
+                text: "Braking Pattern Charts",
+                heading: HeadingLevel.HEADING_2,
+                spacing: { before: 400, after: 200 }
+            })
+        ];
+
+        // Add chart images
+        chartImages.forEach((chart, idx) => {
+            const stationName = chart.stationId.replace('compare-chart-', '').toUpperCase();
+            children.push(
+                new Paragraph({
+                    text: `Station: ${stationName}`,
+                    heading: HeadingLevel.HEADING_3,
+                    spacing: { before: 200, after: 100 }
+                }),
+                new Paragraph({
+                    children: [chart.image],
+                    spacing: { after: 300 }
+                })
+            );
+        });
+
+        const doc = new Document({
+            sections: [{
+                properties: {},
+                children
+            }]
+        });
+
+        // Generate filename
+        const dateStr = new Date().toISOString().split('T')[0];
+        const trainCount = MultiCompare.files.length;
+        const filename = `Braking_Pattern_Analysis_${trainCount}_trains_${dateStr}.docx`;
+
+        progressText.textContent = 'Saving file...';
+
+        const blob = await Packer.toBlob(doc);
+        saveAs(blob, filename);
+
+        progressBar.style.display = 'none';
+        console.log('Braking pattern report generated:', filename);
+
+    } catch (error) {
+        const progressBar = document.getElementById('compareDownloadProgressBar');
+        if (progressBar) progressBar.style.display = 'none';
+        console.error('Error generating braking pattern report:', error);
+        showError('Error generating report: ' + error.message);
+    }
 }
 

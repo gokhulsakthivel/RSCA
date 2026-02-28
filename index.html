@@ -24,7 +24,7 @@
             </button>
             <button class="mode-btn" id="modeCompare" onclick="switchMode('compare')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="9" height="9" rx="1"/><rect x="13" y="2" width="9" height="9" rx="1"/><rect x="2" y="13" width="9" height="9" rx="1"/><rect x="13" y="13" width="9" height="9" rx="1"/></svg>
-                Multi-Train Compare
+                Braking Pattern Analysis
             </button>
         </div>
 
@@ -255,8 +255,8 @@
 
             <!-- Compare Step 2: Station Selection -->
             <div id="compareConfigSection" class="card config-section" style="display: none;">
-                <h2>Select Stations to Compare</h2>
-                <p class="config-subtitle">Choose common halt stations to generate deceleration comparison charts</p>
+                <h2>Braking Pattern Analysis</h2>
+                <p class="config-subtitle">Choose common halt stations to compare braking patterns across trains</p>
 
                 <div class="section-label">COMMON HALT STATIONS</div>
                 <p class="config-hint" style="margin-bottom: 12px;">These stations appear as halts in all uploaded files. Click to select/deselect.</p>
@@ -294,8 +294,8 @@
                             <path d="M20 32L28 40L44 24" stroke="#6C5CE7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </div>
-                    <h2>Comparison Ready!</h2>
-                    <p>Deceleration patterns compared across all uploaded train data.</p>
+                    <h2>Braking Pattern Analysis Complete!</h2>
+                    <p>Braking patterns compared across all uploaded train data.</p>
                 </div>
 
                 <!-- Train Legend -->
@@ -306,9 +306,21 @@
 
                 <!-- Comparison Charts -->
                 <section class="card results-section">
-                    <h2>Deceleration Comparison Charts</h2>
+                    <h2>Braking Pattern Charts</h2>
                     <div id="compareChartsContainer" class="decel-charts-grid"></div>
                 </section>
+
+                <!-- Download Button -->
+                <div class="download-section">
+                    <button id="downloadCompareBtn" class="btn btn-primary">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>
+                        Download Braking Pattern Report
+                    </button>
+                    <div id="compareDownloadProgressBar" class="progress-bar" style="display: none; margin-top: 20px;">
+                        <div class="progress-bar-fill"></div>
+                        <span class="progress-text">Generating document...</span>
+                    </div>
+                </div>
             </div>
         </div>
 

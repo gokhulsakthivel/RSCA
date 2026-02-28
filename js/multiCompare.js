@@ -193,11 +193,15 @@ const MultiCompare = {
         const decelDistance = config.decelDistance || 1000;
         const decelMarkers = config.decelMarkers || [120, 60];
 
-        const chartDiv = document.createElement('div');
-        chartDiv.className = 'decel-chart-item';
+        const wrapperDiv = document.createElement('div');
+        wrapperDiv.className = 'decel-chart-item';
         const chartId = `compare-chart-${station}`;
+        const chartDiv = document.createElement('div');
         chartDiv.id = chartId;
-        container.appendChild(chartDiv);
+        chartDiv.style.width = '100%';
+        chartDiv.style.minHeight = '500px';
+        wrapperDiv.appendChild(chartDiv);
+        container.appendChild(wrapperDiv);
 
         const traces = [];
         let globalMaxSpeed = 0;
@@ -229,7 +233,8 @@ const MultiCompare = {
         });
 
         if (traces.length === 0) {
-            chartDiv.innerHTML = `<p style="color: var(--color-text-muted); text-align: center; padding: 40px;">No deceleration data available for station ${station}</p>`;
+
+            wrapperDiv.innerHTML = `<p style="color: var(--color-text-muted); text-align: center; padding: 40px;">No deceleration data available for station ${station}</p>`;
             return;
         }
 
