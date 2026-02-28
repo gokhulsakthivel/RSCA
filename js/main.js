@@ -10,8 +10,36 @@ let appState = {
     baseInfo: null,
     processedData: null,
     haltRecords: null,
-    segments: null
+    segments: null,
+    currentStep: 1
 };
+
+/**
+ * Update step indicator UI
+ * @param {number} activeStep - The currently active step (1, 2, or 3)
+ */
+function updateStepIndicator(activeStep) {
+    appState.currentStep = activeStep;
+    const steps = document.querySelectorAll('.step');
+    const lines = document.querySelectorAll('.step-line');
+
+    steps.forEach((step, index) => {
+        const stepNum = index + 1;
+        step.classList.remove('active', 'completed');
+        if (stepNum < activeStep) {
+            step.classList.add('completed');
+        } else if (stepNum === activeStep) {
+            step.classList.add('active');
+        }
+    });
+
+    lines.forEach((line, index) => {
+        line.classList.remove('completed');
+        if (index < activeStep - 1) {
+            line.classList.add('completed');
+        }
+    });
+}
 
 // Initialize application when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -176,6 +204,8 @@ async function processCSV(csvContent) {
         hideProgress();
         
         // Step 4: Show configuration form
+
+        updateStepIndicator(2);
         showConfigurationForm(processedData);
         
     } catch (error) {
@@ -283,6 +313,8 @@ function generateAnalysis() {
         showProgress('Generating charts...');
         
         // Display results with filtered data
+
+        updateStepIndicator(3);
         displayResults(filteredData, config);
         
         hideProgress();
