@@ -889,7 +889,7 @@ async function downloadBrakingPatternReport() {
         const chartImages = [];
         const compareContainer = document.getElementById('compareChartsContainer');
         if (compareContainer) {
-            const chartDivs = compareContainer.querySelectorAll('.decel-chart-item');
+            const chartDivs = compareContainer.querySelectorAll('.decel-chart-item .js-plotly-plot');
             for (let i = 0; i < chartDivs.length; i++) {
                 progressText.textContent = `Capturing chart ${i + 1} of ${chartDivs.length}...`;
                 try {
@@ -1026,7 +1026,10 @@ async function downloadBrakingPatternReport() {
             })
         ];
 
-        // Add chart images
+        // Add chart images with station data tables
+        const decelDistVal = parseInt(document.getElementById('compareDecelDistance').value) || 1000;
+        const decelMarkersArr = parseMarkers(document.getElementById('compareDecelMarkers').value);
+
         chartImages.forEach((chart, idx) => {
             const stationName = chart.stationId.replace('compare-chart-', '').toUpperCase();
             children.push(
@@ -1037,8 +1040,80 @@ async function downloadBrakingPatternReport() {
                 }),
                 new Paragraph({
                     children: [chart.image],
-                    spacing: { after: 300 }
+                    spacing: { after: 200 }
                 })
+            );
+
+            // Build station data table for Word document
+            const stationCode = chart.stationId.replace('compare-chart-', '');
+            const markerHeaderCells = decelMarkersArr.map(m =>
+                new TableCell({
+                    children: [new Paragraph({ children: [new TextRun({ text: `Speed at ${m}m`, bold: true, color: 'FFFFFF', size: 18 })] })],
+                    shading: { fill: '667EEA', color: 'auto' }
+                })
+            );
+
+            const stationTableHeader = new TableRow({
+                children: [
+                    ...['Sl. No.', 'Date', 'Train No.', 'Loco No.', 'Colour Code', 'Name of Loco Pilot', 'Design/ Hqrs', 'Speed at Caution Aspect'].map(h =>
+                        new TableCell({
+                            children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, color: 'FFFFFF', size: 18 })] })],
+                            shading: { fill: '667EEA', color: 'auto' }
+                        })
+                    ),
+                    ...markerHeaderCells,
+                    new TableCell({
+                        children: [new Paragraph({ children: [new TextRun({ text: 'Braking Techniques Remarks', bold: true, color: 'FFFFFF', size: 18 })] })],
+                        shading: { fill: '667EEA', color: 'auto' }
+                    })
+                ],
+                tableHeader: true
+            });
+
+            const stationTableRows = MultiCompare.files.map((file, fIdx) => {
+                const segment = MultiCompare.extractDecelSegment(file.processedData, stationCode, decelDistVal);
+                const color = MultiCompare.trainColors[fIdx % MultiCompare.trainColors.length];
+                const colorName = MultiCompare.trainColorNames[fIdx % MultiCompare.trainColorNames.length];
+
+                let cautionSpeed = '-';
+                let markerSpeeds = decelMarkersArr.map(() => '-');
+
+                if (segment) {
+                    const { distToStop, speeds } = MultiCompare.convertToDistanceBased(segment);
+                    const entrySpeed = MultiCompare.getSpeedAtDistance(distToStop, speeds, decelDistVal);
+                    cautionSpeed = entrySpeed !== null ? String(Math.round(entrySpeed)) : '-';
+                    markerSpeeds = decelMarkersArr.map(m => {
+                        const spd = MultiCompare.getSpeedAtDistance(distToStop, speeds, m);
+                        return spd !== null ? String(Math.round(spd)) : '-';
+                    });
+                }
+
+                const markerCells = markerSpeeds.map(s =>
+                    new TableCell({ children: [new Paragraph({ text: s, alignment: AlignmentType.CENTER })] })
+                );
+
+                return new TableRow({
+                    children: [
+                        new TableCell({ children: [new Paragraph({ text: String(fIdx + 1), alignment: AlignmentType.CENTER })] }),
+                        new TableCell({ children: [new Paragraph({ text: file.baseInfo.date || '-' })] }),
+                        new TableCell({ children: [new Paragraph({ text: file.baseInfo.trainNumber || '-' })] }),
+                        new TableCell({ children: [new Paragraph({ text: file.baseInfo.locoNumber || '-' })] }),
+                        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: colorName, color: color.replace('#', '') })] })] }),
+                        new TableCell({ children: [new Paragraph({ text: file.baseInfo.pilot || '-' })] }),
+                        new TableCell({ children: [new Paragraph({ text: '-' })] }),
+                        new TableCell({ children: [new Paragraph({ text: cautionSpeed, alignment: AlignmentType.CENTER })] }),
+                        ...markerCells,
+                        new TableCell({ children: [new Paragraph({ text: '' })] })
+                    ]
+                });
+            });
+
+            children.push(
+                new Table({
+                    width: { size: 100, type: WidthType.PERCENTAGE },
+                    rows: [stationTableHeader, ...stationTableRows]
+                }),
+                new Paragraph({ text: '', spacing: { after: 300 } })
             );
         });
 

@@ -21,6 +21,12 @@ const MultiCompare = {
         '#9B59B6', // Violet
     ],
 
+    /** Color names matching trainColors palette */
+    trainColorNames: [
+        'Purple', 'Red', 'Green', 'Orange', 'Blue',
+        'Dark Purple', 'Teal', 'Dark Orange', 'Light Green', 'Violet'
+    ],
+
     /**
      * Reset state for a new comparison session
      */
@@ -330,6 +336,118 @@ const MultiCompare = {
         };
 
         Plotly.newPlot(chartId, traces, layout, plotConfig);
+
+        // Generate and append the data table below the chart
+        const tableHTML = this.generateStationTable(station, config, decelDistance);
+        const tableContainer = document.createElement('div');
+        tableContainer.className = 'compare-station-table';
+        tableContainer.innerHTML = tableHTML;
+        wrapperDiv.appendChild(tableContainer);
+    },
+
+    /**
+     * Interpolate speed at a specific distance-to-stop from distance-based data
+     * @param {Array<number>} distToStop - Distance to stop array (descending)
+     * @param {Array<number>} speeds - Speed array
+     * @param {number} targetDist - Target distance to stop (m)
+     * @returns {number|null} Interpolated speed or null if out of range
+     */
+    getSpeedAtDistance(distToStop, speeds, targetDist) {
+        if (!distToStop || !speeds || distToStop.length === 0) return null;
+
+        // distToStop is descending (high to low)
+        // Find the two adjacent points bracketing targetDist
+        for (let i = 0; i < distToStop.length - 1; i++) {
+            const d1 = distToStop[i];
+            const d2 = distToStop[i + 1];
+            if ((d1 >= targetDist && d2 <= targetDist) || (d1 <= targetDist && d2 >= targetDist)) {
+                // Linear interpolation
+                const range = d1 - d2;
+                if (Math.abs(range) < 0.001) return speeds[i];
+                const ratio = (d1 - targetDist) / range;
+                return speeds[i] + ratio * (speeds[i + 1] - speeds[i]);
+            }
+        }
+
+        // If targetDist is beyond the data range, return the closest boundary
+        if (targetDist >= distToStop[0]) return speeds[0];
+        if (targetDist <= distToStop[distToStop.length - 1]) return speeds[speeds.length - 1];
+        return null;
+    },
+
+    /**
+     * Generate HTML table for a station's braking pattern data
+     * @param {string} station - Station code
+     * @param {Object} config - { decelDistance, decelMarkers }
+     * @param {number} decelDistance - Deceleration distance
+     * @returns {string} HTML table string
+     */
+    generateStationTable(station, config, decelDistance) {
+        const decelMarkers = config.decelMarkers || [120, 60];
+
+        // Build marker column headers
+        const markerHeaders = decelMarkers.map(m => `<th>Speed at ${m}m</th>`).join('');
+
+        let rows = '';
+        this.files.forEach((file, idx) => {
+            const segment = this.extractDecelSegment(file.processedData, station, decelDistance);
+            const color = this.trainColors[idx % this.trainColors.length];
+            const colorName = this.trainColorNames[idx % this.trainColorNames.length];
+
+            let cautionSpeed = '-';
+            let markerSpeeds = decelMarkers.map(() => '-');
+
+            if (segment) {
+                const { distToStop, speeds } = this.convertToDistanceBased(segment);
+
+                // Speed at Caution Aspect = speed at the start of decel zone (max dist to stop)
+                const entrySpeed = this.getSpeedAtDistance(distToStop, speeds, decelDistance);
+                cautionSpeed = entrySpeed !== null ? Math.round(entrySpeed) : '-';
+
+                // Speed at each marker distance
+                markerSpeeds = decelMarkers.map(m => {
+                    const spd = this.getSpeedAtDistance(distToStop, speeds, m);
+                    return spd !== null ? Math.round(spd) : '-';
+                });
+            }
+
+            const markerCells = markerSpeeds.map(s => `<td>${s}</td>`).join('');
+
+            rows += `<tr>
+                <td>${idx + 1}</td>
+                <td>${file.baseInfo.date || '-'}</td>
+                <td>${file.baseInfo.trainNumber || '-'}</td>
+                <td>${file.baseInfo.locoNumber || '-'}</td>
+                <td><span class="color-badge" style="background:${color};color:#fff;">${colorName}</span></td>
+                <td>${file.baseInfo.pilot || '-'}</td>
+                <td>-</td>
+                <td>${cautionSpeed}</td>
+                ${markerCells}
+                <td></td>
+            </tr>`;
+        });
+
+        return `<div class="table-container compare-data-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sl. No.</th>
+                        <th>Date</th>
+                        <th>Train No.</th>
+                        <th>Loco No.</th>
+                        <th>Colour Code</th>
+                        <th>Name of the Loco Pilot / Shri</th>
+                        <th>Design/ Hqrs</th>
+                        <th>Speed at Caution Aspect</th>
+                        ${markerHeaders}
+                        <th>Braking Techniques Remarks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+        </div>`;
     },
 
     /**

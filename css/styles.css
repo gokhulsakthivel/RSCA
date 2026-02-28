@@ -575,6 +575,45 @@ header h1 {
     padding-top: 0;
 }
 
+/* -- Compare Station Data Table -- */
+.compare-station-table {
+    margin-top: 16px;
+}
+
+.compare-data-table {
+    margin-top: 0;
+}
+
+.compare-data-table table {
+    min-width: 900px;
+}
+
+.compare-data-table th {
+    white-space: nowrap;
+    text-align: center;
+    font-size: 0.75rem;
+}
+
+.compare-data-table td {
+    text-align: center;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.compare-data-table td:last-child {
+    min-width: 180px;
+    text-align: left;
+}
+
+.color-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
 /* ---------- Tables ---------- */
 .table-container {
     overflow-x: auto;
